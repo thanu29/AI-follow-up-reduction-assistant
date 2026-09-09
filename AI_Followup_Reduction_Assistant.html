@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Follow-up Reduction Assistant</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;background:#f5f7fb;color:#20242a}
+header{background:#172033;color:white;padding:22px 32px}
+header h1{margin:0 0 6px;font-size:25px}
+header p{margin:0;color:#cbd3e1}
+nav{display:flex;gap:8px;padding:14px 32px;background:white;border-bottom:1px solid #ddd}
+nav button{padding:10px 16px;border:1px solid #ccd2dc;background:white;border-radius:7px;cursor:pointer}
+nav button.active{background:#172033;color:white}
+main{max-width:900px;margin:28px auto;padding:0 20px}
+.card{background:white;border:1px solid #ddd;border-radius:12px;padding:24px;margin-bottom:18px}
+h2{margin-top:0}
+label{display:block;font-weight:600;margin:16px 0 7px}
+input,textarea,select{width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd1da;border-radius:7px;font-size:14px}
+textarea{min-height:80px;resize:vertical}
+button.primary{margin-top:20px;background:#172033;color:white;border:0;padding:12px 18px;border-radius:7px;cursor:pointer}
+.result{padding:15px;border-radius:8px;background:#f1f4f8;margin-top:16px}
+.warn{border-left:4px solid #d28a00;background:#fff7e6}
+.good{border-left:4px solid #328a55;background:#edf8f1}
+.badge{display:inline-block;padding:5px 9px;border-radius:20px;background:#e8edf5;margin:4px;font-size:13px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:12px;border-bottom:1px solid #ddd}
+.hidden{display:none}
+.small{font-size:13px;color:#68717f}
+</style>
+</head>
+<body>
+<header>
+<h1>AI Follow-up Reduction Assistant</h1>
+<p>AI-powered workflow for smarter project updates and reduced manager follow-ups</p>
+</header>
+
+<nav>
+<button id="navForm" class="active" onclick="show('form')">Employee Update</button>
+<button id="navAI" onclick="show('ai')">AI Check</button>
+<button id="navDash" onclick="show('dash')">Manager Dashboard</button>
+</nav>
+
+<main>
+<section id="form" class="card">
+<h2>Submit Project Update</h2>
+<p class="small">Employees submit a short update. The assistant checks whether important information is missing.</p>
+<label>Employee Name</label><input id="employee">
+<label>Project / Task Name</label><input id="project">
+<label>What did you complete?</label><textarea id="completed"></textarea>
+<label>What are you currently working on?</label><textarea id="working"></textarea>
+<label>Expected completion date</label><input id="completion" type="date">
+<label>Any blocker or dependency?</label><p class="small">If Yes, mention any issue, dependency, delay, or support needed. If there is none, write "No blocker."</p><textarea id="blocker" placeholder='No blocker.'></textarea>
+<button class="primary" onclick="analyze()">Submit Update & Run AI Check</button>
+</section>
+
+<section id="ai" class="card hidden">
+<h2>AI Check</h2>
+<div id="aiOutput"></div>
+</section>
+
+<section id="dash" class="card hidden">
+<h2>Manager Dashboard</h2>
+<div id="dashboard"></div>
+</section>
+</main>
+
+<script>
+let updates=[];
+
+function show(page){
+  ['form','ai','dash'].forEach(x=>document.getElementById(x).classList.toggle('hidden',x!==page));
+  ['Form','AI','Dash'].forEach(x=>document.getElementById('nav'+x).classList.remove('active'));
+  document.getElementById('nav'+(page==='form'?'Form':page==='ai'?'AI':'Dash')).classList.add('active');
+  if(page==='dash') renderDashboard();
+}
+
+function analyze(){
+  const employee=document.getElementById('employee').value.trim();
+  const project=document.getElementById('project').value.trim();
+  const completed=document.getElementById('completed').value.trim();
+  const working=document.getElementById('working').value.trim();
+  const completion=document.getElementById('completion').value;
+  const blocker=document.getElementById('blocker').value.trim();
+
+  if(!employee||!project||!completed||!working){alert('Please complete the required fields.');return;}
+
+  const missing=[];
+  if(!completion) missing.push('Expected completion date');
+  if(!blocker) missing.push('Blocker or dependency');
+
+  let status='In Progress';
+  let manager='No action required';
+  let follow='No';
+
+  if(blocker && !/^no blocker\.?$/i.test(blocker)){
+    status='Blocked';
+    manager='Manager attention required';
+  }
+  if(missing.length){
+    follow='Yes';
+    manager='Follow-up required';
+  }
+
+  const item={employee,project,completed,working,completion,blocker:blocker||'Not provided',status,follow,manager,missing};
+  updates.push(item);
+
+  let html=`<div class="result ${missing.length?'warn':'good'}">
+  <strong>${missing.length?'⚠ Follow-up needed':'✓ Update looks complete'}</strong>
+  <p><b>Employee:</b> ${employee}<br><b>Project:</b> ${project}</p>`;
+
+  if(missing.length){
+    html+=`<p><b>Missing information:</b> ${missing.join(', ')}</p>
+    <p><b>AI follow-up question:</b> What is the expected completion date, and are there any blockers or dependencies?</p>`;
+  } else {
+    html+=`<p><b>Status:</b> ${status}<br><b>Expected completion:</b> ${new Date(completion).toLocaleDateString()}<br><b>Blocker:</b> ${blocker}<br><b>Manager action:</b> ${manager}</p>`;
+  }
+  html+='</div>';
+
+  html+=`<div class="result"><h3>Structured Update</h3>
+  <p><b>Task:</b> ${project}<br><b>Status:</b> ${status}<br>
+  <b>Current work:</b> ${working}<br><b>Expected completion:</b> ${completion?new Date(completion).toLocaleDateString():'Missing'}<br>
+  <b>Blocker:</b> ${blocker||'Missing'}<br><b>Action required:</b> ${manager}</p></div>`;
+
+  document.getElementById('aiOutput').innerHTML=html;
+  show('ai');
+}
+
+function renderDashboard(){
+  if(!updates.length){
+    document.getElementById('dashboard').innerHTML='<p>No updates yet.</p>';return;
+  }
+  const blocked=updates.filter(x=>x.status==='Blocked').length;
+  const follow=updates.filter(x=>x.follow==='Yes').length;
+  let html=`<p><span class="badge">Total updates: ${updates.length}</span>
+  <span class="badge">Follow-ups: ${follow}</span>
+  <span class="badge">Blocked: ${blocked}</span></p>
+  <table><tr><th>Employee</th><th>Project</th><th>Status</th><th>Follow-up</th><th>Manager Action</th></tr>`;
+  updates.forEach(x=>html+=`<tr><td>${x.employee}</td><td>${x.project}</td><td>${x.status}</td><td>${x.follow}</td><td>${x.manager}</td></tr>`);
+  html+='</table>';
+  document.getElementById('dashboard').innerHTML=html;
+}
+</script>
+</body>
+</html>
