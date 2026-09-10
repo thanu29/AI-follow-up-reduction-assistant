@@ -16,17 +16,19 @@ main{max-width:900px;margin:28px auto;padding:0 20px}
 .card{background:white;border:1px solid #ddd;border-radius:12px;padding:24px;margin-bottom:18px}
 h2{margin-top:0}
 label{display:block;font-weight:600;margin:16px 0 7px}
-input,textarea,select{width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd1da;border-radius:7px;font-size:14px}
+input,textarea{width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd1da;border-radius:7px;font-size:14px}
 textarea{min-height:80px;resize:vertical}
 button.primary{margin-top:20px;background:#172033;color:white;border:0;padding:12px 18px;border-radius:7px;cursor:pointer}
 .result{padding:15px;border-radius:8px;background:#f1f4f8;margin-top:16px}
 .warn{border-left:4px solid #d28a00;background:#fff7e6}
 .good{border-left:4px solid #328a55;background:#edf8f1}
+.bad{border-left:4px solid #b33a3a;background:#fff0f0}
 .badge{display:inline-block;padding:5px 9px;border-radius:20px;background:#e8edf5;margin:4px;font-size:13px}
 table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:12px;border-bottom:1px solid #ddd}
+th,td{text-align:left;padding:12px;border-bottom:1px solid #ddd;vertical-align:top}
 .hidden{display:none}
 .small{font-size:13px;color:#68717f}
+.attention{font-weight:700}
 </style>
 </head>
 <body>
@@ -36,31 +38,42 @@ th,td{text-align:left;padding:12px;border-bottom:1px solid #ddd}
 </header>
 
 <nav>
-<button id="navForm" class="active" onclick="show('form')">Employee Update</button>
-<button id="navAI" onclick="show('ai')">AI Check</button>
-<button id="navDash" onclick="show('dash')">Manager Dashboard</button>
+<button id="navEmployee" class="active" onclick="show('employee')">Employee View</button>
+<button id="navManager" onclick="show('manager')">Manager View</button>
 </nav>
 
 <main>
-<section id="form" class="card">
-<h2>Submit Project Update</h2>
-<p class="small">Employees submit a short update. The assistant checks whether important information is missing.</p>
-<label>Employee Name</label><input id="employee">
+<section id="employee" class="card">
+<h2>Employee Update</h2>
+<p class="small">Employees submit a short project update. After submission, the assistant automatically checks the update.</p>
+
+<label>Employee Name</label><input id="employeeName">
 <label>Project / Task Name</label><input id="project">
 <label>What did you complete?</label><textarea id="completed"></textarea>
 <label>What are you currently working on?</label><textarea id="working"></textarea>
 <label>Expected completion date</label><input id="completion" type="date">
-<label>Any blocker or dependency?</label><p class="small">If Yes, mention any issue, dependency, delay, or support needed. If there is none, write "No blocker."</p><textarea id="blocker" placeholder='No blocker.'></textarea>
-<button class="primary" onclick="analyze()">Submit Update & Run AI Check</button>
+<label>Any blocker or dependency?</label>
+<p class="small">If there is none, write "No blocker." If there is an issue, mention the dependency, delay, or support needed.</p>
+<textarea id="blocker" placeholder="No blocker."></textarea>
+
+<button class="primary" onclick="submitUpdate()">Submit Project Update</button>
+
+<div id="employeeResult"></div>
+
+<div id="followupBox" class="result warn hidden">
+<h3>AI Follow-up</h3>
+<p id="followupQuestion"></p>
+<label>Expected completion date</label>
+<input id="followupCompletion" type="date">
+<label>Blocker or dependency</label>
+<textarea id="followupBlocker" placeholder="No blocker."></textarea>
+<button class="primary" onclick="submitFollowup()">Submit Missing Details</button>
+</div>
 </section>
 
-<section id="ai" class="card hidden">
-<h2>AI Check</h2>
-<div id="aiOutput"></div>
-</section>
-
-<section id="dash" class="card hidden">
+<section id="manager" class="card hidden">
 <h2>Manager Dashboard</h2>
+<p class="small">Managers review structured updates and focus only on items that need attention.</p>
 <div id="dashboard"></div>
 </section>
 </main>
@@ -69,75 +82,154 @@ th,td{text-align:left;padding:12px;border-bottom:1px solid #ddd}
 let updates=[];
 
 function show(page){
-  ['form','ai','dash'].forEach(x=>document.getElementById(x).classList.toggle('hidden',x!==page));
-  ['Form','AI','Dash'].forEach(x=>document.getElementById('nav'+x).classList.remove('active'));
-  document.getElementById('nav'+(page==='form'?'Form':page==='ai'?'AI':'Dash')).classList.add('active');
-  if(page==='dash') renderDashboard();
+  document.getElementById('employee').classList.toggle('hidden',page!=='employee');
+  document.getElementById('manager').classList.toggle('hidden',page!=='manager');
+  document.getElementById('navEmployee').classList.toggle('active',page==='employee');
+  document.getElementById('navManager').classList.toggle('active',page==='manager');
+  if(page==='manager') renderDashboard();
 }
 
-function analyze(){
-  const employee=document.getElementById('employee').value.trim();
+function cleanDate(value){
+  if(!value) return 'Missing';
+  return new Date(value+'T00:00:00').toLocaleDateString();
+}
+
+function submitUpdate(){
+  const employee=document.getElementById('employeeName').value.trim();
   const project=document.getElementById('project').value.trim();
   const completed=document.getElementById('completed').value.trim();
   const working=document.getElementById('working').value.trim();
   const completion=document.getElementById('completion').value;
   const blocker=document.getElementById('blocker').value.trim();
 
-  if(!employee||!project||!completed||!working){alert('Please complete the required fields.');return;}
+  if(!employee||!project||!completed||!working){
+    alert('Please complete the required fields.');
+    return;
+  }
 
   const missing=[];
   if(!completion) missing.push('Expected completion date');
   if(!blocker) missing.push('Blocker or dependency');
 
-  let status='In Progress';
-  let manager='No action required';
-  let follow='No';
+  const status = blocker && !/^no blocker\.?$/i.test(blocker) ? 'Blocked' : 'In Progress';
+  const manager = blocker && !/^no blocker\.?$/i.test(blocker) ? 'Manager attention required' : (missing.length ? 'Waiting for employee details' : 'No action required');
 
-  if(blocker && !/^no blocker\.?$/i.test(blocker)){
-    status='Blocked';
-    manager='Manager attention required';
-  }
-  if(missing.length){
-    follow='Yes';
-    manager='Follow-up required';
-  }
-
-  const item={employee,project,completed,working,completion,blocker:blocker||'Not provided',status,follow,manager,missing};
+  const item={
+    employee,project,completed,working,completion,
+    blocker:blocker||'Missing',
+    status,follow:missing.length?'Yes':'No',
+    manager,missing,resolved:false
+  };
   updates.push(item);
 
-  let html=`<div class="result ${missing.length?'warn':'good'}">
-  <strong>${missing.length?'⚠ Follow-up needed':'✓ Update looks complete'}</strong>
-  <p><b>Employee:</b> ${employee}<br><b>Project:</b> ${project}</p>`;
+  let out=`<div class="result ${missing.length?'warn':'good'}">
+  <strong>${missing.length?'⚠ Update needs clarification':'✓ Update checked successfully'}</strong>
+  <p><b>Project:</b> ${project}<br>
+  <b>Status:</b> ${status}<br>
+  <b>Expected completion:</b> ${cleanDate(completion)}<br>
+  <b>Blocker:</b> ${blocker||'Missing'}</p>`;
 
   if(missing.length){
-    html+=`<p><b>Missing information:</b> ${missing.join(', ')}</p>
-    <p><b>AI follow-up question:</b> What is the expected completion date, and are there any blockers or dependencies?</p>`;
-  } else {
-    html+=`<p><b>Status:</b> ${status}<br><b>Expected completion:</b> ${new Date(completion).toLocaleDateString()}<br><b>Blocker:</b> ${blocker}<br><b>Manager action:</b> ${manager}</p>`;
+    out+=`<p><b>AI found missing:</b> ${missing.join(', ')}</p>
+    <p><b>Manager impact:</b> The manager does not need to chase the employee manually. The assistant asks for the missing details.</p></div>`;
+    document.getElementById('followupQuestion').textContent =
+      'Please provide the missing project details so the manager receives a complete update.';
+    document.getElementById('followupCompletion').value=completion;
+    document.getElementById('followupBlocker').value=blocker;
+    document.getElementById('followupBox').classList.remove('hidden');
+  }else{
+    out+=`<p><b>Manager action:</b> ${manager}</p></div>`;
+    out+=structured(item);
+    document.getElementById('followupBox').classList.add('hidden');
   }
-  html+='</div>';
 
-  html+=`<div class="result"><h3>Structured Update</h3>
-  <p><b>Task:</b> ${project}<br><b>Status:</b> ${status}<br>
-  <b>Current work:</b> ${working}<br><b>Expected completion:</b> ${completion?new Date(completion).toLocaleDateString():'Missing'}<br>
-  <b>Blocker:</b> ${blocker||'Missing'}<br><b>Action required:</b> ${manager}</p></div>`;
+  document.getElementById('employeeResult').innerHTML=out;
+}
 
-  document.getElementById('aiOutput').innerHTML=html;
-  show('ai');
+function structured(item){
+  return `<div class="result"><h3>Manager-Ready Structured Update</h3>
+  <p><b>Task:</b> ${item.project}<br>
+  <b>Status:</b> ${item.status}<br>
+  <b>Current work:</b> ${item.working}<br>
+  <b>Expected completion:</b> ${cleanDate(item.completion)}<br>
+  <b>Blocker:</b> ${item.blocker}<br>
+  <b>Action required:</b> ${item.manager}</p></div>`;
+}
+
+function submitFollowup(){
+  const completion=document.getElementById('followupCompletion').value;
+  const blocker=document.getElementById('followupBlocker').value.trim();
+
+  if(!completion||!blocker){
+    alert('Please provide both missing details.');
+    return;
+  }
+
+  const item=updates[updates.length-1];
+  item.completion=completion;
+  item.blocker=blocker;
+  item.missing=[];
+  item.follow='No';
+  item.resolved=true;
+
+  if(!/^no blocker\.?$/i.test(blocker)){
+    item.status='Blocked';
+    item.manager='Manager attention required';
+  }else{
+    item.status='In Progress';
+    item.manager='No action required';
+  }
+
+  document.getElementById('followupBox').classList.add('hidden');
+  document.getElementById('employeeResult').innerHTML += `
+  <div class="result good">
+    <strong>✓ Missing details submitted</strong>
+    <p>The update is now complete and ready for manager review.</p>
+  </div>
+  ${structured(item)}`;
 }
 
 function renderDashboard(){
   if(!updates.length){
-    document.getElementById('dashboard').innerHTML='<p>No updates yet.</p>';return;
+    document.getElementById('dashboard').innerHTML='<p>No project updates have been submitted yet.</p>';
+    return;
   }
+
   const blocked=updates.filter(x=>x.status==='Blocked').length;
   const follow=updates.filter(x=>x.follow==='Yes').length;
-  let html=`<p><span class="badge">Total updates: ${updates.length}</span>
-  <span class="badge">Follow-ups: ${follow}</span>
-  <span class="badge">Blocked: ${blocked}</span></p>
-  <table><tr><th>Employee</th><th>Project</th><th>Status</th><th>Follow-up</th><th>Manager Action</th></tr>`;
-  updates.forEach(x=>html+=`<tr><td>${x.employee}</td><td>${x.project}</td><td>${x.status}</td><td>${x.follow}</td><td>${x.manager}</td></tr>`);
+  const attention=updates.filter(x=>x.manager==='Manager attention required').length;
+  const complete=updates.filter(x=>x.follow==='No').length;
+
+  let html=`<p>
+  <span class="badge">Total updates: ${updates.length}</span>
+  <span class="badge">Complete: ${complete}</span>
+  <span class="badge">Needs clarification: ${follow}</span>
+  <span class="badge">Blocked: ${blocked}</span>
+  <span class="badge">Manager attention: ${attention}</span>
+  </p>`;
+
+  html+=`<h3>Manager Attention</h3>`;
+  const attentionItems=updates.filter(x=>x.manager==='Manager attention required');
+  if(!attentionItems.length) html+=`<div class="result good">No confirmed blockers need manager attention right now.</div>`;
+  else attentionItems.forEach(x=>{
+    html+=`<div class="result bad">
+    <strong>${x.project} — ${x.employee}</strong>
+    <p>Blocker: ${x.blocker}<br><b>Action:</b> ${x.manager}</p>
+    </div>`;
+  });
+
+  html+=`<h3>All Project Updates</h3>
+  <table><tr><th>Employee</th><th>Project</th><th>Status</th><th>Expected completion</th><th>Blocker / Risk</th><th>Manager action</th></tr>`;
+  updates.forEach(x=>html+=`<tr>
+    <td>${x.employee}</td>
+    <td>${x.project}</td>
+    <td>${x.status}</td>
+    <td>${cleanDate(x.completion)}</td>
+    <td>${x.blocker}</td>
+    <td class="${x.manager==='Manager attention required'?'attention':''}">${x.manager}</td>
+  </tr>`);
   html+='</table>';
+
   document.getElementById('dashboard').innerHTML=html;
 }
 </script>
